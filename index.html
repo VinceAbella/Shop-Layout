@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Floor Plan — Prototype</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="index.css">
+
+    <!-- PWA: installable on Android + iOS -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#16232F">
+
+    <!-- iOS home-screen support (Safari doesn't read manifest.json fully) -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Floor Plan">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+    <link rel="icon" href="icon-192.png">
+</head>
+<body>
+
+    <header>
+        <div class="title-block">
+            <p class="eyebrow">Connects live to your Google Sheet</p>
+            <h1>Floor Plan — Sample Warehouse</h1>
+        </div>
+        <div>
+            <div class="search-wrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input id="search" type="text" placeholder="Search an item…" autocomplete="off">
+            </div>
+            <div class="search-status" id="search-status"></div>
+        </div>
+    </header>
+
+    <main>
+        <div class="plan-area">
+            <p style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--chrome-dim); margin:0 0 12px;">
+                Drag a block to move it · drag its bottom-right corner to resize
+            </p>
+            <div class="overlap-banner" id="overlap-banner">⚠ Two or more blocks are overlapping — drag one to clear the conflict.</div>
+            <div class="plan-grid-wrap">
+                <div class="corner"></div>
+                <div class="ruler" id="col-ruler"></div>
+                <div class="ruler" id="row-ruler"></div>
+                <div id="grid"></div>
+            </div>
+        </div>
+
+        <aside>
+            <div class="panel">
+                <h2>Legend</h2>
+                <div class="legend-row"><span class="swatch" style="background:var(--paper); border:1.5px solid var(--paper-border)"></span> Shelf</div>
+                <div class="legend-row"><span class="swatch" style="background:var(--entrance)"></span> Entrance</div>
+                <div class="legend-row"><span class="swatch" style="background:var(--cashier)"></span> Cashier / Checkout</div>
+            </div>
+
+            <div class="panel">
+                <h2>Selected shelf</h2>
+                <div id="detail-empty">Click a shelf on the plan to see what's stocked there.</div>
+                <div id="detail-content" style="display:none"></div>
+            </div>
+
+            <div class="panel">
+                <h2>Drag to add</h2>
+                <div class="palette">
+                    <div class="palette-tile shelf" data-type="shelf">Shelf</div>
+                    <div class="palette-tile entrance" data-type="entrance">Entrance</div>
+                    <div class="palette-tile cashier" data-type="cashier">Cashier</div>
+                </div>
+                <p style="font-size:11px; color:var(--chrome-dim); margin:8px 0 0;">Drag a tile onto the plan to place it, then name it in the panel above.</p>
+            </div>
+
+            <div class="panel">
+                <h2>All elements</h2>
+                <div id="data-status" class="data-status">Loading from Sheet…</div>
+                <div class="manage-list" id="manage-list"></div>
+            </div>
+
+            <p class="note">Shelf/Entrance/Cashier positions come from <strong>Layout Elements</strong>. What's shown on each shelf card is pulled live from the <strong>Items</strong> tab, matched by <strong>Shelf ID</strong>.</p>
+        </aside>
+    </main>
+
+    <script src="script.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('service-worker.js').catch((err) => {
+                    console.warn('Service worker registration failed:', err);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
