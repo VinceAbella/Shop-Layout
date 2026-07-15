@@ -1,10 +1,87 @@
-
 const DEFAULT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbyh1BqVN_uOqyHWw0zPxxSdqAIDKtapr0hQMvivgSc1TOidLOEem5muvh-Q2r3sbziTdQ/exec';
 const DEFAULT_TOKEN = 'warehouse_secret_2026'; // <- put the value you set in Script Properties
 
 let webAppUrl = DEFAULT_WEBAPP_URL;
 let accessToken = DEFAULT_TOKEN;
 let connected = false;
+
+// ========== Edit lock ==========
+// This is a front-end convenience lock only — it hides the editing controls from
+// casual visitors. It does NOT stop someone who reads script.js and calls the
+// Apps Script API directly with the token above. See chat notes for the real fix.
+//
+// SHA-256 hash of the current passcode ("shoplayout2026" by default).
+// To change the passcode: open this page's browser console and run
+//   crypto.subtle.digest('SHA-256', new TextEncoder().encode('yourNewPasscode'))
+//     .then(b => console.log([...new Uint8Array(b)].map(x => x.toString(16).padStart(2,'0')).join('')))
+// then paste the printed hash in as EDIT_PASSCODE_HASH below.
+const EDIT_PASSCODE_HASH = '2fd3f0fabd65f4e05c049bc7b338466a0377a7786a14bd71356db97c59c0964';
+
+let editUnlocked = false; // always starts locked on load/refresh, by design
+
+async function sha256Hex(text) {
+  const buf = new TextEncoder().encode(text);
+  const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(hashBuf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function updateLockUI() {
+  document.body.classList.toggle('locked', !editUnlocked);
+  const status = document.getElementById('lock-status');
+  const unlockBtn = document.getElementById('unlock-btn');
+  const lockBtn = document.getElementById('lock-btn');
+  if (editUnlocked) {
+    status.textContent = '🔓 Editing unlocked for this session';
+    status.classList.remove('locked'); status.classList.add('unlocked');
+    unlockBtn.style.display = 'none';
+    lockBtn.style.display = 'block';
+  } else {
+    status.textContent = '🔒 View-only — editing is locked';
+    status.classList.remove('unlocked'); status.classList.add('locked');
+    unlockBtn.style.display = 'block';
+    lockBtn.style.display = 'none';
+  }
+}
+
+document.getElementById('unlock-btn').addEventListener('click', async function() {
+  const attempt = prompt('Enter passcode to unlock editing:');
+  if (attempt === null) return;
+  const hash = await sha256Hex(attempt.trim());
+  if (hash === EDIT_PASSCODE_HASH) {
+    editUnlocked = true;
+    updateLockUI();
+    render();
+    if (selectedId) { const el = elements.find(e => e.id === selectedId); if (el) renderDetail(el); }
+  } else {
+    alert('Incorrect passcode.');
+  }
+});
+
+document.getElementById('lock-btn').addEventListener('click', function() {
+  editUnlocked = false;
+  updateLockUI();
+  if (selectedId) { const el = elements.find(e => e.id === selectedId); if (el) renderDetail(el); }
+});
+
+updateLockUI();
+
+// ========== Side panel toggle ==========
+(function() {
+  const toggleBtn = document.getElementById('panel-toggle');
+  const mainEl = document.querySelector('main');
+  const label = toggleBtn.querySelector('span');
+  let panelHidden = true; // starts hidden — see main.html's initial "panel-hidden" class + button state
+
+  toggleBtn.addEventListener('click', function() {
+    panelHidden = !panelHidden;
+    mainEl.classList.toggle('panel-hidden', panelHidden);
+    toggleBtn.setAttribute('aria-pressed', String(panelHidden));
+    toggleBtn.title = panelHidden ? 'Show side panel' : 'Hide side panel';
+    label.textContent = panelHidden ? 'Show panel' : 'Hide panel';
+    // Grid metrics depend on the plan area's width, which just changed.
+    onViewportChange();
+  });
+})();
 
 const LAYOUT_TABLE = 'Layout Elements';
 const SHELVES_TABLE = 'Shelves';
@@ -154,9 +231,65 @@ async function deleteItemFromSheet(shelfId, partName) {
 }
 
 // ========== Prototype variables ==========
-const CELL = 48;
-const GAP = 0;
-const TRACK = CELL + GAP;
+// Cell size is fitted dynamically to the plan area's actual available width
+// (so the grid never needs a horizontal scrollbar), capped at a sensible
+// default per breakpoint so cells don't look oversized when there's room
+// to spare. Mirrors the --cell-size defaults set in index.css.
+function getBreakpointCellSize() {
+  const w = window.innerWidth;
+  if (w <= 480) return 30;
+  if (w <= 900) return 38;
+  return 48;
+}
+
+function getCellSize() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--cell-size').trim();
+  const px = parseFloat(raw);
+  return (isFinite(px) && px > 0) ? px : 48;
+}
+
+let CELL = getCellSize();
+let GAP = 0;
+let TRACK = CELL + GAP;
+
+function recalcGridMetrics() {
+  CELL = getCellSize();
+  TRACK = CELL + GAP;
+}
+
+function applyCellSize(px) {
+  document.documentElement.style.setProperty('--cell-size', px + 'px');
+  recalcGridMetrics();
+}
+
+// Called from render() with the current column count, so it can react to
+// elements being added/removed/moved as well as the window resizing.
+function fitCellSizeToContainer(maxCol) {
+  const defaultSize = getBreakpointCellSize();
+  const wrap = document.querySelector('.plan-grid-wrap');
+  if (!wrap || maxCol <= 0) { applyCellSize(defaultSize); return; }
+
+  const rowRuler = document.getElementById('row-ruler');
+  const rulerWidth = rowRuler ? rowRuler.getBoundingClientRect().width : 26;
+  const available = wrap.clientWidth - rulerWidth;
+
+  if (available <= 0) { applyCellSize(defaultSize); return; }
+
+  const fitBySpace = Math.floor(available / maxCol);
+  const finalSize = Math.max(20, Math.min(defaultSize, fitBySpace));
+  applyCellSize(finalSize);
+}
+
+let gridResizeTimer = null;
+function onViewportChange() {
+  clearTimeout(gridResizeTimer);
+  gridResizeTimer = setTimeout(function() {
+    render();
+    if (selectedId) { const el = elements.find(e => e.id === selectedId); if (el) renderDetail(el); }
+  }, 150);
+}
+window.addEventListener('resize', onViewportChange);
+window.addEventListener('orientationchange', onViewportChange);
 
 let elements = [];
 let inventoryData = [];
@@ -188,6 +321,7 @@ function render() {
 
   const maxCol = Math.max(9, ...elements.map(e => e.col + (e.w || 1))) + 1;
   const maxRow = Math.max(7, ...elements.map(e => e.row + (e.h || 1))) + 1;
+  fitCellSizeToContainer(maxCol);
   grid.style.gridTemplateColumns = `repeat(${maxCol}, ${CELL}px)`;
   renderRulers(maxCol, maxRow);
 
@@ -202,9 +336,32 @@ function render() {
   }
   document.getElementById('overlap-banner').classList.toggle('show', overlapIds.size > 0);
 
+  // Flag elements that share BOTH the same ID and the same name — a genuine
+  // duplicate (as opposed to two different shelves both defaulted to "New Shelf").
+  const dupGroups = {};
+  elements.forEach(el => {
+    const key = el.id + '||' + el.label;
+    (dupGroups[key] = dupGroups[key] || []).push(el);
+  });
+  const dupIds = new Set();
+  Object.values(dupGroups).forEach(group => {
+    if (group.length > 1) {
+      dupIds.add(group[0].id);
+    }
+  });
+  const dupBanner = document.getElementById('duplicate-banner');
+  if (dupIds.size > 0) {
+    const examples = [...dupIds].slice(0, 3).join(', ');
+    dupBanner.textContent = '⚠ Duplicate shelf' + (dupIds.size > 1 ? 's' : '') + ' detected (same ID and name): ' + examples + (dupIds.size > 3 ? ', …' : '') + ' — rename or remove one.';
+    dupBanner.classList.add('show');
+  } else {
+    dupBanner.classList.remove('show');
+  }
+
   elements.forEach(el => {
     const div = document.createElement('div');
     div.className = 'cell ' + el.type;
+    div.dataset.id = el.id;
     div.style.gridColumnStart = el.col + 1;
     div.style.gridRowStart = el.row + 1;
     div.style.gridColumnEnd = 'span ' + (el.w || 1);
@@ -215,6 +372,7 @@ function render() {
     if (isMatch) { div.classList.add('match'); matchCount++; }
     if (el.id === selectedId) div.classList.add('selected');
     if (overlapIds.has(el.id)) div.classList.add('overlap');
+    if (dupIds.has(el.id)) div.classList.add('duplicate');
     if (el.id === lastAddedId) div.classList.add('pop-in');
 
     div.innerHTML = '<div class="label">' + el.label + '</div>' +
@@ -250,9 +408,15 @@ function renderRulers(maxCol, maxRow) {
 
 // ========== Drag / resize / palette ==========
 function attachDrag(div, el) {
-  div.addEventListener('mousedown', function(e) {
+  div.addEventListener('pointerdown', function(e) {
     if (e.target.classList.contains('resize-handle')) return;
+    if (!editUnlocked) {
+      // View-only: tapping/clicking a shelf still opens its detail panel, just no moving it.
+      if (el.type === 'shelf') { selectedId = el.id; renderDetail(el); render(); }
+      return;
+    }
     e.preventDefault();
+    div.setPointerCapture(e.pointerId);
     const gridRect = grid.getBoundingClientRect();
     const divRect = div.getBoundingClientRect();
     const offsetX = e.clientX - divRect.left;
@@ -276,8 +440,11 @@ function attachDrag(div, el) {
       }
     }
     function onUp() {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      if (finished) return;
+      finished = true;
+      div.removeEventListener('pointermove', onMove);
+      div.removeEventListener('pointerup', onUp);
+      div.removeEventListener('pointercancel', onUp);
       if (moved) {
         el.col = Math.max(0, Math.round((parseFloat(div.style.left) || 0) / TRACK));
         el.row = Math.max(0, Math.round((parseFloat(div.style.top) || 0) / TRACK));
@@ -290,6 +457,7 @@ function attachDrag(div, el) {
       }
     }
 
+    let finished = false;
     div.style.position = 'absolute';
     div.style.left = Math.round(startLeft) + 'px';
     div.style.top = Math.round(startTop) + 'px';
@@ -297,14 +465,17 @@ function attachDrag(div, el) {
     div.style.height = ((el.h || 1) * CELL + ((el.h || 1) - 1) * GAP) + 'px';
     div.style.zIndex = 15;
     div.style.gridColumnStart = ''; div.style.gridRowStart = ''; div.style.gridColumnEnd = ''; div.style.gridRowEnd = '';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    div.addEventListener('pointermove', onMove);
+    div.addEventListener('pointerup', onUp);
+    div.addEventListener('pointercancel', onUp);
   });
 }
 
 function attachResize(handle, el, div) {
-  handle.addEventListener('mousedown', function(e) {
+  handle.addEventListener('pointerdown', function(e) {
+    if (!editUnlocked) return;
     e.preventDefault(); e.stopPropagation();
+    handle.setPointerCapture(e.pointerId);
     const gridRect = grid.getBoundingClientRect();
     const divRect = div.getBoundingClientRect();
     const startX = e.clientX, startY = e.clientY;
@@ -323,8 +494,11 @@ function attachResize(handle, el, div) {
       div.style.height = px(Math.max(1, Math.round(origH + dy / TRACK))) + 'px';
     }
     function onUp(ev) {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      if (finished) return;
+      finished = true;
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
       el.w = Math.max(1, Math.round(origW + dx / TRACK));
       el.h = Math.max(1, Math.round(origH + dy / TRACK));
@@ -332,15 +506,21 @@ function attachResize(handle, el, div) {
       render();
       if (connected) saveElementToSheet(el, false).catch(showDataError);
     }
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    let finished = false;
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
   });
 }
 
 function attachPalette() {
   document.querySelectorAll('.palette-tile').forEach(function(tile) {
-    tile.addEventListener('mousedown', function(e) {
+    tile.addEventListener('pointerdown', function(e) {
+      if (!editUnlocked) return;
+      if (tile.dataset.dragging === '1') return; // a previous drag on this tile never cleaned up — ignore instead of stacking a 2nd listener set
+      tile.dataset.dragging = '1';
       e.preventDefault();
+      tile.setPointerCapture(e.pointerId);
       const type = tile.dataset.type;
       const ghost = document.createElement('div');
       ghost.className = 'ghost-tile';
@@ -352,24 +532,34 @@ function attachPalette() {
       function pos(ev) { ghost.style.left = Math.round(ev.clientX - CELL / 2) + 'px'; ghost.style.top = Math.round(ev.clientY - CELL / 2) + 'px'; }
       pos(e);
       function onMove(ev) { pos(ev); }
+      let finished = false; // belt-and-suspenders: even if both pointerup and pointercancel fire, only act once
       function onUp(ev) {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
+        if (finished) return;
+        finished = true;
+        tile.dataset.dragging = '';
+        tile.removeEventListener('pointermove', onMove);
+        tile.removeEventListener('pointerup', onUp);
+        tile.removeEventListener('pointercancel', onUp);
         ghost.remove();
         const gridRect = grid.getBoundingClientRect();
         if (ev.clientX < gridRect.left || ev.clientY < gridRect.top) return;
         const col = Math.max(0, Math.round((ev.clientX - gridRect.left) / TRACK));
         const row = Math.max(0, Math.round((ev.clientY - gridRect.top) / TRACK));
-        const id = type === 'shelf'
-          ? 'S' + String(elements.filter(el => el.type === 'shelf').length + 1).padStart(3, '0')
-          : type.toUpperCase() + (Date.now() % 1000);
+        let idNum = elements.filter(el => el.type === 'shelf').length + 1;
+        let id;
+        if (type === 'shelf') {
+          do { id = 'S' + String(idNum).padStart(3, '0'); idNum++; } while (elements.some(el => el.id === id));
+        } else {
+          id = type.toUpperCase() + (Date.now() % 1000);
+        }
         const newEl = { id, type, row, col, w: 1, h: 1, label: type === 'shelf' ? 'New Shelf' : (type === 'entrance' ? 'Entrance' : 'Checkout'), shelfId: null, realItems: [], rawItems: [], items: [] };
         elements.push(newEl); selectedId = newEl.id; lastAddedId = newEl.id;
         render(); renderDetail(newEl);
         if (connected) saveElementToSheet(newEl, true).catch(showDataError);
       }
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
+      tile.addEventListener('pointermove', onMove);
+      tile.addEventListener('pointerup', onUp);
+      tile.addEventListener('pointercancel', onUp);
     });
   });
 }
@@ -384,13 +574,16 @@ function renderManageList() {
     row.innerHTML =
       '<div class="m-label"><span>' + el.label + '</span>' +
       '<span class="tag">' + el.type + ' · ' + el.id + ' · r' + el.row + 'c' + el.col + ' · ' + (el.w || 1) + '×' + (el.h || 1) + '</span></div>' +
-      '<button title="Remove">×</button>';
-    row.querySelector('button').addEventListener('click', function() { removeElement(el.id); });
+      (editUnlocked ? '<button title="Remove">×</button>' : '');
+    if (editUnlocked) {
+      row.querySelector('button').addEventListener('click', function() { removeElement(el.id); });
+    }
     list.appendChild(row);
   });
 }
 
 async function removeElement(id) {
+  if (!editUnlocked) return;
   const el = elements.find(e => e.id === id);
   elements = elements.filter(e => e.id !== id);
   if (selectedId === id) { selectedId = null; detailEmpty.style.display = 'block'; detailContent.style.display = 'none'; }
@@ -426,9 +619,9 @@ function renderDetail(el) {
 
   detailContent.innerHTML =
     '<span class="shelf-id">' + el.id + ' · ' + (el.w || 1) + '×' + (el.h || 1) + ' cells' + (el.shelfLabel ? ' · ' + el.shelfLabel : '') + '</span>' +
-    '<input class="edit-field" id="edit-label" type="text" value="' + el.label.replace(/"/g, '&quot;') + '">' +
+    '<input class="edit-field" id="edit-label" type="text" value="' + el.label.replace(/"/g, '&quot;') + '"' + (editUnlocked ? '' : ' readonly') + '>' +
     (showItems ? ('<div style="font-size:11px; color:var(--chrome-dim); margin-bottom:6px; margin-top:10px;"><strong>Items on this shelf</strong></div>' + realItemsHtml) : '') +
-    (showItems ? '<div style="background:var(--bg); border:1px solid var(--bg-line-strong); padding:10px; border-radius:6px; margin-bottom:10px;">' +
+    (showItems && editUnlocked ? '<div style="background:var(--bg); border:1px solid var(--bg-line-strong); padding:10px; border-radius:6px; margin-bottom:10px;">' +
       '<div style="font-size:11px; color:var(--chrome-dim); margin-bottom:8px;"><strong>Add new item</strong></div>' +
       '<input class="edit-field" id="item-part-name" list="inventory-list" type="text" placeholder="Type to search items..." style="margin-bottom:6px;">' +
       '<datalist id="inventory-list">' + 
@@ -440,22 +633,27 @@ function renderDetail(el) {
       '<input class="edit-field" id="item-alt-names" type="text" placeholder="Alt Names (comma separated)" style="margin-bottom:6px;">' +
       '<button id="add-item-btn" style="background:var(--highlight); color:var(--ink); border:none; padding:6px 10px; border-radius:4px; font-weight:600; font-size:11px; cursor:pointer; width:100%;">Add Item</button>' +
       '</div>' : '') +
-    '<button id="save-btn">Save shelf label</button>' +
-    '<button id="remove-btn">Remove this element</button>' +
-    '<div id="save-status" style="margin-top:8px;font-size:12px;color:var(--chrome-dim)"></div>';
+    (editUnlocked
+      ? ('<button id="save-btn">Save shelf label</button>' +
+         '<button id="remove-btn">Remove this element</button>' +
+         '<div id="save-status" style="margin-top:8px;font-size:12px;color:var(--chrome-dim)"></div>')
+      : '<div class="locked-note">🔒 Unlock editing to rename, restock, move, or remove elements.</div>');
 
-  document.getElementById('save-btn').addEventListener('click', function() {
-    const status = document.getElementById('save-status');
-    el.label = document.getElementById('edit-label').value.trim() || el.label;
-    render(); renderDetail(el);
-    if (!connected) { status.textContent = 'Not connected — changes are local only.'; status.style.color = 'var(--chrome-dim)'; return; }
-    status.textContent = 'Saving…'; status.style.color = 'var(--highlight)';
-    saveElementToSheet(el, false).then(() => {
-      status.textContent = 'Saved ✓'; status.style.color = 'var(--highlight)';
-    }).catch(err => { status.textContent = err.message; status.style.color = 'var(--danger)'; });
-  });
-  
-  if (showItems) {
+  if (editUnlocked) {
+    document.getElementById('save-btn').addEventListener('click', function() {
+      const status = document.getElementById('save-status');
+      el.label = document.getElementById('edit-label').value.trim() || el.label;
+      render(); renderDetail(el);
+      if (!connected) { status.textContent = 'Not connected — changes are local only.'; status.style.color = 'var(--chrome-dim)'; return; }
+      status.textContent = 'Saving…'; status.style.color = 'var(--highlight)';
+      saveElementToSheet(el, false).then(() => {
+        status.textContent = 'Saved ✓'; status.style.color = 'var(--highlight)';
+      }).catch(err => { status.textContent = err.message; status.style.color = 'var(--danger)'; });
+    });
+    document.getElementById('remove-btn').addEventListener('click', function() { removeElement(el.id); });
+  }
+
+  if (showItems && editUnlocked) {
     // Auto-fill SKU when Part Name is selected from inventory
     const partNameInput = document.getElementById('item-part-name');
     const skuInput = document.getElementById('item-sku');
@@ -503,15 +701,90 @@ function renderDetail(el) {
       }
     });
   }
-  
-  document.getElementById('remove-btn').addEventListener('click', function() { removeElement(el.id); });
 }
 
 // ========== Search ==========
 searchInput.addEventListener('input', function() {
   render();
+  renderSearchResults();
   if (selectedId) { const el = elements.find(e => e.id === selectedId); if (el) renderDetail(el); }
 });
+
+searchInput.addEventListener('focus', function() {
+  if (searchInput.value.trim()) renderSearchResults();
+});
+
+searchInput.addEventListener('blur', function() {
+  // Small delay so a click on a result row registers before the dropdown disappears.
+  setTimeout(() => { document.getElementById('search-results').classList.remove('show'); }, 150);
+});
+
+function jumpToShelf(id, name) {
+  const el = elements.find(e => e.id === id);
+  if (!el) return;
+  if (name) searchInput.value = name;
+  selectedId = id;
+  render();
+  renderDetail(el);
+  document.getElementById('search-results').classList.remove('show');
+  const cellDiv = document.querySelector('.cell[data-id="' + CSS.escape(id) + '"]');
+  if (cellDiv) cellDiv.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+}
+
+function renderSearchResults() {
+  const box = document.getElementById('search-results');
+  const query = searchInput.value.trim().toLowerCase();
+  if (!query) { box.classList.remove('show'); box.innerHTML = ''; return; }
+
+  const results = [];
+  elements.forEach(el => {
+    if (el.type !== 'shelf') return;
+    (el.realItems || []).forEach(it => {
+      const hay = [it.partName, it.sku, it.altNames].map(v => String(v || '').toLowerCase());
+      if (hay.some(h => h.includes(query))) {
+        results.push({
+          name: it.partName || '(unnamed item)',
+          meta: el.id + (el.shelfLabel ? ' · ' + el.shelfLabel : '') + (it.sku ? ' · ' + it.sku : ''),
+          qty: it.qty !== '' && it.qty != null ? String(it.qty) : '',
+          shelfId: el.id
+        });
+      }
+    });
+    (el.rawItems || []).forEach(name => {
+      if (String(name).toLowerCase().includes(query)) {
+        results.push({ name: name, meta: el.id + (el.shelfLabel ? ' · ' + el.shelfLabel : ''), qty: '', shelfId: el.id });
+      }
+    });
+  });
+
+  if (results.length === 0) {
+    box.innerHTML = '<div class="search-result-empty">No matching items</div>';
+    box.classList.add('show');
+    return;
+  }
+
+  const LIMIT = 8;
+  const shown = results.slice(0, LIMIT);
+  box.innerHTML = shown.map(r =>
+    '<div class="search-result-row" data-shelf-id="' + r.shelfId.replace(/"/g, '&quot;') + '" data-name="' + r.name.replace(/"/g, '&quot;') + '">' +
+      '<div class="sr-main">' +
+        '<div class="sr-name">' + r.name.replace(/</g, '&lt;') + '</div>' +
+        '<div class="sr-meta">' + r.meta.replace(/</g, '&lt;') + '</div>' +
+      '</div>' +
+      (r.qty ? '<div class="sr-qty">' + r.qty + '</div>' : '') +
+    '</div>'
+  ).join('') + (results.length > LIMIT ? '<div class="search-result-more">+ ' + (results.length - LIMIT) + ' more — refine your search</div>' : '');
+
+  box.querySelectorAll('.search-result-row').forEach(row => {
+    row.addEventListener('mousedown', function(e) {
+      // mousedown (not click) fires before the input's blur handler removes the dropdown
+      e.preventDefault();
+      jumpToShelf(row.dataset.shelfId, row.dataset.name);
+    });
+  });
+
+  box.classList.add('show');
+}
 
 // ========== Connect ==========
 function showDataError(err) {
