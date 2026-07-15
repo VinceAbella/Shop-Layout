@@ -2,7 +2,7 @@
   "name": "Warehouse Floor Plan",
   "short_name": "Floor Plan",
   "description": "Live floor plan and inventory tool connected to your Google Sheet.",
-  "start_url": "./main.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",

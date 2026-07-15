@@ -15,7 +15,7 @@ let connected = false;
 //   crypto.subtle.digest('SHA-256', new TextEncoder().encode('yourNewPasscode'))
 //     .then(b => console.log([...new Uint8Array(b)].map(x => x.toString(16).padStart(2,'0')).join('')))
 // then paste the printed hash in as EDIT_PASSCODE_HASH below.
-const EDIT_PASSCODE_HASH = '2fd3f0fabd65f4e05c049bc7b338466a0377a7786a14bd71356db97c59c0964';
+const EDIT_PASSCODE_HASH = 'd740b3968a92fdb9dd59457a00cdaddd2cc0c5022eeea76883a4847beee4ccbb';
 
 let editUnlocked = false; // always starts locked on load/refresh, by design
 
