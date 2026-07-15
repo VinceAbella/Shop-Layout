@@ -1,9 +1,9 @@
-const CACHE_NAME = 'floorplan-shell-v1';
+const CACHE_NAME = 'floorplan-shell-v2';
 
 // Only the static app shell is cached. Anything going to script.google.com
 // (your live Sheet data) is always fetched fresh from the network.
 const SHELL_FILES = [
-  './main.html',
+  './index.html',
   './index.css',
   './script.js',
   './manifest.json',
